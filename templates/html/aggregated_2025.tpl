@@ -255,24 +255,32 @@
                 columns: [[{
                     field: 'student_number',
                     title: 'Student #',
-                    sortable: true
+                    sortable: true,
+                    searchable: true
                     }, {
                     field: 'name',
                     title: 'Full Name',
-                    sortable: true
+                    sortable: true,
+                    searchable: true
                     }, {
                     field: 'utorid',
                     title: 'UTORid',
-                    sortable: true
+                    sortable: true,
+                    searchable: true
                     }, {
                     field: 'email',
                     title: 'Email',
-                    sortable: true
+                    sortable: true,
+                    searchable: true,
+                    formatter: function(value, row, index) {
+                        return '<a href="mailto:' + value + '" class="text-primary-400 hover:text-primary-300">' + value + '</a>';
+                    }
                     }, {
                     field: 'source',
                     title: 'Source',
                     sortable: true,
-                    visible: false
+                    visible: false,
+                    searchable: true
                     }].concat(testCaseNamesToColumns(tests))],
 
                 data: translateToRows(aggregated),
@@ -431,7 +439,7 @@
                         name: report.results[assignment].students[student].last + ', ' + report.results[assignment].students[student].first,
                         utorid: report.results[assignment].students[student].student_id,
                         source: report.results[assignment].origin,
-                        email: '<a href="mailto:' + report.results[assignment].students[student].email + '" class="text-primary-400 hover:text-primary-300">' + report.results[assignment].students[student].email + '</a>'
+                        email: report.results[assignment].students[student].email
                     }, getRowPasses(report.results[assignment].results, true));
 
                     rows.push(row);
@@ -509,6 +517,7 @@
                     field: testCaseName,
                     title: testCaseName,
                     sortable: true,
+                    searchable: false,
                     cellStyle: colourRatio,
                     visible: false,
                     sorter: gradeSorter,
