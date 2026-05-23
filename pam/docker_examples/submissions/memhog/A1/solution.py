@@ -11,14 +11,14 @@ the process; do not run without ``docker_enabled = True``.
 
 
 def _eat_memory():
-    # Hold references in a list so the garbage collector cannot reclaim.
+    # Hold references in a list so the garbage collector cannot reclaim,
+    # and allocate a *fresh* buffer each iteration. ``bytearray(N)``
+    # guarantees a new N-byte allocation; ``b'\x00' * N`` would also
+    # allocate, but reusing a cached chunk via ``chunk * 1`` would not
+    # (CPython returns the same object for ``bytes * 1``).
     chunks = []
-    chunk = b'\x00' * (16 * 1024 * 1024)  # 16 MiB
-    while True:
-        chunks.append(chunk * 1)
-        # 64 * 16 MiB = 1 GiB upper bound on this loop.
-        if len(chunks) > 64:
-            break
+    while len(chunks) <= 64:                       # 64 * 16 MiB = 1 GiB
+        chunks.append(bytearray(16 * 1024 * 1024))
     return chunks
 
 

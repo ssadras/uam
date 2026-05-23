@@ -1,21 +1,28 @@
 """Malicious submission: writes a huge file to the container's rootfs.
 
-Verifies that ``docker_disk`` (``--storage-opt size=``) caps the
-writable layer of the container, killing the process with ENOSPC
-before the host fills up.
+Verifies that ``docker_disk`` caps disk writes before the host fills
+up. ``docker_disk`` is enforced via *two* Docker flags:
+
+  * ``--storage-opt size=``  caps the writable rootfs layer, but only
+    on storage drivers that support per-container quotas. The default
+    overlay2-on-ext4 and the rootless ``overlayfs`` driver silently
+    ignore it.
+  * ``--ulimit fsize=``      caps the size of any single file via
+    ``RLIMIT_FSIZE`` and is enforced by the kernel regardless of
+    storage driver.
+
+Because we write one large file, the ulimit half catches us on every
+storage driver: the ``write()`` returns ``EFBIG`` once the file size
+hits the cap. On drivers that support it, the storage-opt cap fires
+in parallel as the rootfs layer fills.
 
 Why ``/tmp`` and not the working directory?
 -------------------------------------------
-``--storage-opt size=`` limits the *container's writable rootfs layer*,
-not bind-mounted host directories. The student's submission directory
-is a bind mount, so writes there bypass ``docker_disk`` and land on
-the host disk. ``/tmp`` inside the container, on the other hand, lives
-on the container's rootfs and *is* covered by the cap.
-
-For real grading deployments, also place a filesystem quota (XFS
-prjquota, ext4 quota, …) on the host directory that holds student
-submissions if you want to bound writes to the bind mount too. See
-the top-level README for the full discussion.
+The submission directory is a bind mount, so writes there pass
+straight through to the host filesystem and are not covered by
+``--storage-opt size=`` at all. ``/tmp`` inside the container lives on
+the container's writable rootfs, which is what the storage-opt cap
+applies to.
 
 The write target is sized at 2 GiB, well above the default
 ``docker_disk = '1g'``. Outside the sandbox this script will fill the

@@ -82,7 +82,7 @@ docker_binary = 'docker'            # override if docker is not on PATH
 | `docker_image` | image tag | Pick one that already has your test toolchain (Python for pam, JDK for jam). |
 | `docker_cpus` | `--cpus` | Fractional cores. `'0.5'` is half a core. |
 | `docker_memory` | `--memory` / `--memory-swap` | Swap is disabled by setting both equal. |
-| `docker_disk` | `--storage-opt size=` | Caps the container's **writable rootfs layer only** — writes to the bind-mounted submission directory bypass it (see [Bind mounts and disk usage](#bind-mounts-and-disk-usage) below). Also requires a Docker storage driver that supports per-container quotas (overlay2 on xfs+pquota, devicemapper, btrfs, zfs). Docker rejects the option on other drivers — leave `docker_disk` unset there, or switch storage driver. |
+| `docker_disk` | `--storage-opt size=` **and** `--ulimit fsize=` | Two-pronged cap. The storage-opt half limits the container's writable rootfs but only works on storage drivers that support per-container quotas (overlay2 on xfs+pquota, devicemapper, btrfs, zfs); other drivers — including the very common overlay2-on-ext4 and the newer `overlayfs` rootless driver — silently ignore it. The ulimit half caps the maximum size of any *single* file the process can create and is enforced by the kernel via `RLIMIT_FSIZE`, so it works everywhere. Together they catch single-file disk-fill attacks even when the storage driver doesn't help. See [Bind mounts and disk usage](#bind-mounts-and-disk-usage). |
 | `docker_timeout` | `timeout --signal=KILL` inside the container | Enforced in two places: as a `subprocess` timeout on the host, and via `timeout(1)` inside the container, so a student process that ignores signals still dies. Make sure `config.timeout` is `>=` `docker_timeout`. |
 | `docker_network` | `--network` | `'none'` blocks all networking (default). Use `'bridge'` only if tests legitimately need it. |
 | `docker_drop_capabilities` | `--cap-drop ALL --security-opt no-new-privileges` | Strongly recommended. Combined with `docker_user`, this means the container runs as a normal, unprivileged user. |
@@ -131,24 +131,49 @@ When Docker is enabled:
 
 ### Bind mounts and disk usage
 
-`--storage-opt size=` (i.e. `docker_disk`) caps the container's
-**writable rootfs layer only**. Writes to the bind-mounted submission
-directory pass straight through to the host filesystem and are *not*
-counted against that cap. Two consequences for graders:
+`docker_disk` is enforced in two ways at the same time:
 
-- Student code can fill your host disk via the submission directory
-  unless you also place a filesystem quota on the directory that holds
-  submissions. On Linux, the canonical solutions are XFS project
-  quotas (`xfs_quota -x`) or ext4 quotas (`quotaon`, `setquota`).
-  Without one of those, treat `docker_disk` as a defence against
-  rootfs abuse only.
-- Writes that students perform under `/tmp`, `/var/tmp`, or anywhere
-  else that is **not** the bundled bind mount *are* covered by
-  `docker_disk`.
+1. **`--storage-opt size=<spec>`** caps the container's writable
+   rootfs layer. Only some storage drivers honour this option: overlay2
+   on XFS+pquota, devicemapper, btrfs, zfs. The default on most Linux
+   hosts — overlay2 on ext4, and the newer rootless `overlayfs` driver
+   — silently ignores it. To check whether your installation enforces
+   it:
+
+   ```sh
+   docker info | grep 'Storage Driver'
+   docker run --rm --storage-opt size=1g python:3.11-slim \
+       sh -c 'dd if=/dev/zero of=/tmp/x bs=1M count=1500 2>&1 | tail -1'
+   ```
+
+   If the `dd` writes the full 1.5 GiB, the option is being ignored.
+
+2. **`--ulimit fsize=<bytes>`** caps the maximum size of any *single*
+   file the process can create. This is enforced unconditionally by
+   the kernel via `RLIMIT_FSIZE` and works on every storage driver.
+   It catches a student writing one huge file (the most common
+   disk-fill pattern), but does not bound the *total* of many small
+   files.
+
+What `docker_disk` cannot do on its own:
+
+- Cap writes to the bind-mounted submission directory. The bind mount
+  passes straight through to the host filesystem; the storage-opt half
+  doesn't see it at all, and the ulimit half only caps individual
+  files inside it.
+- Stop a student writing thousands of small files on a storage driver
+  that ignores `--storage-opt`. The ulimit cap is per-file.
+
+For comprehensive disk safety in production, layer a filesystem quota
+on the host directory that holds student submissions. On Linux, the
+canonical mechanisms are XFS project quotas (`xfs_quota -x`) or ext4
+quotas (`quotaon`, `setquota`). With one of those in place,
+`docker_disk` becomes the inner ring of defence and the host quota the
+outer.
 
 The bundled [diskhog example](./pam/docker_examples/submissions/diskhog/A1/solution.py)
-deliberately writes to `/tmp/diskhog.bin` so it exercises the
-`docker_disk` cap rather than your host disk.
+writes one large file to `/tmp/diskhog.bin`, so the ulimit half of
+`docker_disk` catches it on every storage driver.
 
 ### Container UID and bind-mount permissions
 

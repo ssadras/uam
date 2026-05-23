@@ -49,6 +49,53 @@ class DockerConfigError(ValueError):
     '''Raised when a config module supplies an invalid Docker setting.'''
 
 
+# Suffix -> multiplier for Docker-style size strings ('1g', '256m', ...).
+_SIZE_UNITS = {
+    'b': 1,
+    'k': 1024,
+    'm': 1024 ** 2,
+    'g': 1024 ** 3,
+    't': 1024 ** 4,
+}
+
+
+def _parse_size(spec):
+    '''Translate a Docker-style size spec to a byte count.
+
+    Accepts ``'1g'``, ``'256M'``, ``'1024k'``, ``'42'`` (bare bytes),
+    or already-numeric values. Raises ``DockerConfigError`` on anything
+    else.
+    '''
+
+    if isinstance(spec, int):
+        if spec <= 0:
+            raise DockerConfigError(
+                'size must be positive (got {!r}).'.format(spec))
+        return spec
+    if not isinstance(spec, str) or not spec.strip():
+        raise DockerConfigError(
+            'size must be a non-empty string (got {!r}).'.format(spec))
+
+    text = spec.strip().lower()
+    suffix = text[-1]
+    if suffix in _SIZE_UNITS:
+        digits = text[:-1]
+    else:
+        digits = text
+        suffix = 'b'
+
+    try:
+        value = int(digits)
+    except ValueError:
+        raise DockerConfigError(
+            'cannot parse size {!r}; expected forms like '
+            "'256m', '1g', '1024k'.".format(spec))
+    if value <= 0:
+        raise DockerConfigError(
+            'size must be positive (got {!r}).'.format(spec))
+    return value * _SIZE_UNITS[suffix]
+
+
 class DockerConfig:
     '''Resolved Docker settings for a single test_runner invocation.
 
@@ -107,6 +154,10 @@ class DockerConfig:
             raise DockerConfigError(
                 'docker_workdir must be an absolute container path '
                 '(got {!r}).'.format(self.workdir))
+        if self.disk:
+            # Validate eagerly so a misconfigured size errors at config
+            # load time, not partway into the run.
+            _parse_size(self.disk)
 
     @staticmethod
     def from_module(config):
@@ -190,10 +241,20 @@ def build_docker_command(test_cmd, host_dir, docker_config):
     ]
 
     if docker_config.disk:
-        # --storage-opt size requires a driver that supports per-container
-        # quotas. Docker rejects it on unsupported drivers; we surface the
-        # error rather than silently dropping the limit.
+        # Two-pronged disk cap:
+        #   * --storage-opt size=<spec>  caps the container's writable
+        #     rootfs layer on storage drivers that support per-container
+        #     quotas (overlay2 on XFS+pquota, devicemapper, btrfs, zfs).
+        #     Other drivers (notably overlay2 on ext4 and the newer
+        #     "overlayfs" driver) silently ignore the option.
+        #   * --ulimit fsize=<bytes>     caps the maximum size of any
+        #     single file the process can create, enforced unconditionally
+        #     by the kernel via RLIMIT_FSIZE. This catches single-file
+        #     disk-fill attacks even when --storage-opt is ignored.
+        # Together they give defense in depth across storage drivers.
         args.extend(['--storage-opt', 'size={}'.format(docker_config.disk)])
+        args.extend(['--ulimit',
+                     'fsize={}'.format(_parse_size(docker_config.disk))])
 
     if docker_config.drop_capabilities:
         args.extend([
