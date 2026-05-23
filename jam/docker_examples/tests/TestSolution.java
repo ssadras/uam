@@ -33,15 +33,28 @@ public final class TestSolution {
         Object run() throws Throwable;
     }
 
+    /**
+     * The aggregate HTML template groups results by
+     * {@code testId.split('.')[:2]} (mirroring unittest's
+     * {@code module.TestCaseClass.testMethod} convention). The
+     * per-test-case key under {@code results} and the test IDs in
+     * {@code tests} must share this prefix.
+     */
+    private static final String TEST_CASE = "docker_examples.SolutionTests";
+
     private static final class Case {
-        final String id;
+        final String method;
         final Probe probe;
         final Object expected;
 
-        Case(String id, Probe probe, Object expected) {
-            this.id = id;
+        Case(String method, Probe probe, Object expected) {
+            this.method = method;
             this.probe = probe;
             this.expected = expected;
+        }
+
+        String fullId() {
+            return TEST_CASE + "." + method;
         }
     }
 
@@ -74,28 +87,29 @@ public final class TestSolution {
 
         for (int i = 0; i < spec.size(); i++) {
             Case c = spec.get(i);
+            String fullId = c.fullId();
             if (allTests.length() > 0) allTests.append(", ");
-            allTests.append(jsonString(c.id));
+            allTests.append(jsonString(fullId));
 
             try {
                 Object actual = c.probe.run();
                 if (equalsBoxed(actual, c.expected)) {
                     if (passes.length() > 0) passes.append(", ");
-                    passes.append(jsonString(c.id)).append(": ")
-                          .append(jsonString(c.id));
+                    passes.append(jsonString(fullId)).append(": ")
+                          .append(jsonString(c.method));
                 } else {
                     anyBad = true;
                     if (failures.length() > 0) failures.append(", ");
-                    failures.append(jsonString(c.id)).append(": ")
-                            .append(failureRecord(c.id,
+                    failures.append(jsonString(fullId)).append(": ")
+                            .append(failureRecord(c.method,
                                     "expected " + repr(c.expected)
                                   + ", got " + repr(actual)));
                 }
             } catch (Throwable t) {
                 anyBad = true;
                 if (errors.length() > 0) errors.append(", ");
-                errors.append(jsonString(c.id)).append(": ")
-                      .append(errorRecord(c.id, t));
+                errors.append(jsonString(fullId)).append(": ")
+                      .append(errorRecord(c.method, t));
             }
         }
 
@@ -118,7 +132,7 @@ public final class TestSolution {
 
         String json = "{\n"
                 + "  \"students\": [],\n"
-                + "  \"results\": {\"docker_examples.SolutionTests\": "
+                + "  \"results\": {" + jsonString(TEST_CASE) + ": "
                 + testCase + "},\n"
                 + "  \"date\": \"N/A\",\n"
                 + "  \"assignment\": \"N/A\",\n"

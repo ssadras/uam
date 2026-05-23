@@ -23,8 +23,15 @@ import sys
 import traceback
 
 
-# Test spec: (test_id, callable, expected). The callable receives the
-# student's `solution` module and returns the value to compare.
+# The aggregate HTML template groups results by ``test_id.split('.')[:2]``
+# (mirroring unittest's ``module.TestCaseClass.test_method`` convention).
+# So the per-test-case bucket key under ``results`` and the test IDs in
+# ``tests`` must share a common ``module.TestCaseClass`` prefix that
+# matches the key here. Keep this string and the result group key in sync.
+TEST_CASE = 'docker_examples.SolutionTests'
+
+# Test spec: (method_name, callable, expected). The full UAM test ID is
+# ``TEST_CASE + '.' + method_name``.
 SPEC = [
     ('test_sum_empty',     lambda s: s.safe_sum([]),          0),
     ('test_sum_one',       lambda s: s.safe_sum([42]),        42),
@@ -36,13 +43,17 @@ SPEC = [
 ]
 
 
+def _full_id(method):
+    return '{}.{}'.format(TEST_CASE, method)
+
+
 def _empty_result():
     return {
         'students': [],
         'results': {},
         'date': 'N/A',
         'assignment': 'N/A',
-        'tests': [test_id for test_id, _, _ in SPEC],
+        'tests': [_full_id(method) for method, _, _ in SPEC],
     }
 
 
@@ -59,38 +70,35 @@ def run():
         # Importing the student file itself crashed (e.g. SyntaxError).
         # Record every spec entry as an error and bail out.
         details = traceback.format_exc()
-        for test_id, _, _ in SPEC:
-            _record(result['results'], 'docker_examples.SolutionTests',
-                    'errors', test_id, {
-                        'description': 'Importing solution.py',
-                        'message': 'Could not import solution module.',
-                        'details': details,
-                    })
+        for method, _, _ in SPEC:
+            test_id = _full_id(method)
+            _record(result['results'], TEST_CASE, 'errors', test_id, {
+                'description': 'Importing solution.py',
+                'message': 'Could not import solution module.',
+                'details': details,
+            })
         return result
 
-    for test_id, call, expected in SPEC:
+    for method, call, expected in SPEC:
+        test_id = _full_id(method)
         try:
             actual = call(solution)
         except Exception as exc:
-            _record(result['results'], 'docker_examples.SolutionTests',
-                    'errors', test_id, {
-                        'description': test_id,
-                        'message': '{}: {}'.format(type(exc).__name__, exc),
-                        'details': traceback.format_exc(),
-                    })
+            _record(result['results'], TEST_CASE, 'errors', test_id, {
+                'description': method,
+                'message': '{}: {}'.format(type(exc).__name__, exc),
+                'details': traceback.format_exc(),
+            })
             continue
 
         if actual == expected:
-            _record(result['results'], 'docker_examples.SolutionTests',
-                    'passes', test_id, test_id)
+            _record(result['results'], TEST_CASE, 'passes', test_id, method)
         else:
-            _record(result['results'], 'docker_examples.SolutionTests',
-                    'failures', test_id, {
-                        'description': test_id,
-                        'message': 'expected {!r}, got {!r}'.format(
-                            expected, actual),
-                        'details': '',
-                    })
+            _record(result['results'], TEST_CASE, 'failures', test_id, {
+                'description': method,
+                'message': 'expected {!r}, got {!r}'.format(expected, actual),
+                'details': '',
+            })
 
     return result
 
