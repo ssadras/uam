@@ -41,7 +41,7 @@ postamble_cmd = (
 
 # Docker sandbox. JVM needs more memory/disk than CPython.
 docker_enabled = True
-docker_image = 'openjdk:11-slim'
+docker_image = 'eclipse-temurin:11-jdk-focal'
 docker_cpus = '1.0'
 docker_memory = '512m'
 docker_disk = '2g'

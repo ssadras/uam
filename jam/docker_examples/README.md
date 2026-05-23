@@ -22,12 +22,12 @@ submissions/<name>/A1/a1soln/Solution.java
 
 The driver runs a fixed spec against the student's `a1soln.Solution`
 and writes a UAM-compatible `result.json`. It uses only the JDK so the
-example works with a plain `openjdk:11-slim` image.
+example works with a plain `eclipse-temurin:11-jdk-focal` image.
 
 ### Run
 
 ```sh
-docker pull openjdk:11-slim
+docker pull eclipse-temurin:11-jdk-focal
 python3 test_runner.py jam/docker_examples/config.py
 ```
 
