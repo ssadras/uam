@@ -45,6 +45,27 @@ test_cmd = [('%s result.json test_asst.py test_2_asst.py' %
 postamble_cmd = 'rm -rf __pycache__ test_asst.py test_2_asst.py pep8.py'
 
 
+# ---- DOCKER SANDBOXING (optional) ---- #
+# When docker_enabled is True, each test_cmd runs inside a disposable
+# Docker container with the student's directory mounted read-write. This
+# isolates malicious or runaway student code from the host. Preamble and
+# postamble commands still run on the host.
+#
+# Any of the docker_* settings below may be omitted; defaults come from
+# utils/defaults.py.
+
+docker_enabled = False
+# docker_image = 'python:3.11-slim'   # image used to run student code
+# docker_cpus = '1.0'                 # fractional CPU cores
+# docker_memory = '256m'              # memory cap (Docker suffixes)
+# docker_disk = '1g'                  # rootfs cap; storage-driver dependent
+# docker_timeout = 60                 # per-command wall-clock in seconds
+# docker_network = 'none'             # 'none' isolates from the network
+# docker_drop_capabilities = True     # drop ALL caps + no-new-privileges
+# docker_workdir = '/submission'      # mount point inside the container
+# docker_binary = 'docker'            # override if docker is not on PATH
+
+
 # ---- AGGREGATION AND TEMPLATING ---- #
 
 # where are the templates? absolute path.

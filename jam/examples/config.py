@@ -51,3 +51,28 @@ test_cmd = [compile_cmd, run_cmd]
 
 # Shell command to be performed after executing tests in a directory or None.
 postamble_cmd = None
+
+
+# ---- DOCKER SANDBOXING (optional) ---- #
+# When docker_enabled is True, each test_cmd runs inside a disposable
+# Docker container with the student's directory mounted read-write. This
+# isolates malicious or runaway student code from the host. Preamble and
+# postamble commands still run on the host.
+#
+# Any of the docker_* settings below may be omitted; defaults come from
+# utils/defaults.py.
+
+docker_enabled = False
+# For jam, pick an image that already contains the JDK and any JAM jars
+# you depend on. You may also need to bind-mount additional paths via
+# preamble_cmd (e.g. copying the JAM libs into the student directory) or
+# build a custom image that already bundles them.
+# docker_image = 'openjdk:11-slim'
+# docker_cpus = '1.0'
+# docker_memory = '512m'
+# docker_disk = '2g'
+# docker_timeout = 120
+# docker_network = 'none'
+# docker_drop_capabilities = True
+# docker_workdir = '/submission'
+# docker_binary = 'docker'

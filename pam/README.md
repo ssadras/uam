@@ -1,3 +1,15 @@
+## PAM — Python AutoMarker
+
+PAM grades Python `unittest`-based assignments. It enforces a per-test
+timeout (preventing infinite loops from hanging the run), and emits a
+UAM-compatible JSON result that aggregator and templator can consume.
+
+This README walks through the three stages of the pipeline: **Grade**,
+**Aggregate**, **Format**. For a high-level overview of the framework
+itself, see the top-level [README](../README.md). For sandboxing
+student code with Docker, see [Docker sandbox](#docker-sandbox) below.
+
+
 ## Grade
 
 1. Student submission(s).
@@ -37,6 +49,8 @@ unittest files: see [test_asst.py](./examples/test_asst.py) and/or
 3. Configure test_runner.py.
 
 You need a configuration file. See [examples/config.py](./examples/config.py).
+At a minimum, update `path_to_uam` to the absolute path of your UAM
+checkout.
 
 
 4. Finally,
@@ -94,7 +108,7 @@ If all went well, you should have a file `aggregated.json` that contains
 full results of running all tests on all student submissions.
 
 
-##  Format.
+##  Format
 
 JSONs are great, but we want good looking summaries.
 
@@ -116,6 +130,34 @@ You are welcome to contribute your own templates!
 See 
   `python3 templator.py --help`
 for full information and more options.
+
+
+## Docker sandbox
+
+When `docker_enabled = True` is set in your config, each `test_cmd`
+runs inside a disposable Docker container with CPU, memory, disk, and
+wall-clock limits applied. The student's submission directory is
+bind-mounted into the container so `result.json` still ends up in the
+expected place for the aggregator.
+
+The bundled example config [examples/config.py](./examples/config.py)
+includes a commented-out Docker block you can adapt. For the full
+explanation of each setting, see the
+[Docker sandbox section](../README.md#docker-sandbox) of the top-level
+README.
+
+Pam-specific tips:
+
+- Use an image that ships with Python — `python:3.11-slim` is a
+  sensible default.
+- Because your `test_cmd` runs *inside* the container, paths like
+  `path_to_uam/pam/pam.py` won't resolve unless the UAM tree is also
+  available there. Two common workarounds:
+  - Use `preamble_cmd` to copy [pam.py](./pam.py) and any helpers into
+    the student directory (which *is* mounted), then call `python3
+    pam.py result.json test_asst.py ...` from the working directory.
+  - Or build a custom image that already contains UAM and reference it
+    via `docker_image`.
 
 
 ## Support

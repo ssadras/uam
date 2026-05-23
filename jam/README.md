@@ -1,3 +1,16 @@
+## JAM — Java AutoMarker
+
+JAM grades JUnit 4-based Java assignments. The JAM test runner is a
+JUnit `RunListener` that captures per-test results and exception traces
+and emits a UAM-compatible JSON.
+
+This README walks through the three stages of the pipeline:
+**Compile**, **Grade**, **Aggregate**, **Format**. For a high-level
+overview of the framework itself, see the top-level
+[README](../README.md). For sandboxing student code with Docker, see
+[Docker sandbox](#docker-sandbox) below.
+
+
 ## Compile JAM
 
  Make sure [compile_jam.sh](./compile_jam.sh) is executable. Then:
@@ -58,7 +71,8 @@ test suit for A1.
 3. Configure test_runner.py.
 
 You need a configuration file. See
-[examples/config.py](./examples/config.py).
+[examples/config.py](./examples/config.py). At a minimum, update
+`uam_dir` to the absolute path of your UAM checkout.
 
 4. Finally,
 
@@ -114,7 +128,7 @@ If all went well, you should have a file `aggregated.json` that contains
 full results of running all tests on all student submissions.
 
 
-##  Format.
+##  Format
 
 JSONs are great, but we want good looking summaries.
 
@@ -136,6 +150,37 @@ You are welcome to contribute your own templates!
 See 
   `python3 templator.py --help`
 for full information and more options.
+
+
+## Docker sandbox
+
+When `docker_enabled = True` is set in your config, each `test_cmd`
+runs inside a disposable Docker container with CPU, memory, disk, and
+wall-clock limits applied. The student's submission directory is
+bind-mounted into the container so `result.json` still ends up in the
+expected place for the aggregator.
+
+The bundled example config [examples/config.py](./examples/config.py)
+includes a commented-out Docker block you can adapt. For the full
+explanation of each setting, see the
+[Docker sandbox section](../README.md#docker-sandbox) of the top-level
+README.
+
+Jam-specific tips:
+
+- Use an image with a matching JDK — `openjdk:11-slim` works for most
+  introductory courses.
+- Jam's `test_cmd` relies on classpaths that point at JAM libs and the
+  exception-explanations XML. Those paths must resolve **inside the
+  container**. Either:
+  - copy the JAM jars and tests into the student directory in
+    `preamble_cmd` (which runs on the host) and reference them with
+    paths relative to `docker_workdir`, or
+  - build a custom image that bundles UAM and the JAM jars at known
+    paths, and point `docker_image` at it.
+- Java compilation and JVM start-up are significantly more expensive
+  than Python — bump `docker_memory` (e.g. `'512m'` or `'1g'`) and
+  `docker_timeout` accordingly.
 
 
 ## Support
