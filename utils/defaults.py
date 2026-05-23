@@ -46,5 +46,16 @@ DEFAULT_DOCKER_NETWORK = 'none'
 # Strongly recommended; only disable if tests require elevated privileges.
 DEFAULT_DOCKER_DROP_CAPABILITIES = True
 
+# User the container process runs as (Docker --user).
+#   'host'       -- resolved at runtime to the current host UID:GID, so
+#                   bind-mount permissions line up. This is the default
+#                   because --cap-drop ALL strips CAP_DAC_OVERRIDE, which
+#                   means container-root can no longer write to a host
+#                   directory it does not own.
+#   '<uid>:<gid>' or '<name>' -- passed verbatim to docker --user.
+#   None / ''    -- omit --user; container starts as whatever USER the
+#                   image declares (usually root).
+DEFAULT_DOCKER_USER = 'host'
+
 # Path to the docker CLI binary. Override if docker lives outside PATH.
 DEFAULT_DOCKER_BINARY = 'docker'

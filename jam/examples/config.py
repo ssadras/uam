@@ -74,5 +74,7 @@ docker_enabled = False
 # docker_timeout = 120
 # docker_network = 'none'
 # docker_drop_capabilities = True
+# docker_user = 'host'                # 'host' -> current UID:GID; required
+#                                     #   when capabilities are dropped
 # docker_workdir = '/submission'
 # docker_binary = 'docker'

@@ -64,7 +64,7 @@ test_cmd = ['python3 test_solution.py']
 
 # Clean up the staged driver and any compiled artefacts the in-container
 # Python interpreter may have left behind in the bind-mounted directory.
-postamble_cmd = 'rm -rf test_solution.py __pycache__ diskhog.bin'
+postamble_cmd = 'rm -rf test_solution.py __pycache__'
 
 
 # ---- DOCKER SANDBOX ---- #

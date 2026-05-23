@@ -72,6 +72,7 @@ docker_disk = '1g'                  # container rootfs cap (--storage-opt size)
 docker_timeout = 60                 # per-command wall-clock limit, seconds
 docker_network = 'none'             # 'none' isolates from network; 'bridge' restores it
 docker_drop_capabilities = True     # drop ALL Linux caps + no-new-privileges
+docker_user = 'host'                # 'host' = current UID:GID; '' to disable
 docker_workdir = '/submission'      # mount point inside the container
 docker_binary = 'docker'            # override if docker is not on PATH
 ```
@@ -81,10 +82,11 @@ docker_binary = 'docker'            # override if docker is not on PATH
 | `docker_image` | image tag | Pick one that already has your test toolchain (Python for pam, JDK for jam). |
 | `docker_cpus` | `--cpus` | Fractional cores. `'0.5'` is half a core. |
 | `docker_memory` | `--memory` / `--memory-swap` | Swap is disabled by setting both equal. |
-| `docker_disk` | `--storage-opt size=` | Requires a Docker storage driver that supports per-container quotas (overlay2 on xfs+pquota, devicemapper, btrfs, zfs). Docker rejects the option on other drivers — leave `docker_disk` unset there, or switch storage driver. |
+| `docker_disk` | `--storage-opt size=` | Caps the container's **writable rootfs layer only** — writes to the bind-mounted submission directory bypass it (see [Bind mounts and disk usage](#bind-mounts-and-disk-usage) below). Also requires a Docker storage driver that supports per-container quotas (overlay2 on xfs+pquota, devicemapper, btrfs, zfs). Docker rejects the option on other drivers — leave `docker_disk` unset there, or switch storage driver. |
 | `docker_timeout` | `timeout --signal=KILL` inside the container | Enforced in two places: as a `subprocess` timeout on the host, and via `timeout(1)` inside the container, so a student process that ignores signals still dies. Make sure `config.timeout` is `>=` `docker_timeout`. |
 | `docker_network` | `--network` | `'none'` blocks all networking (default). Use `'bridge'` only if tests legitimately need it. |
-| `docker_drop_capabilities` | `--cap-drop ALL --security-opt no-new-privileges` | Strongly recommended. |
+| `docker_drop_capabilities` | `--cap-drop ALL --security-opt no-new-privileges` | Strongly recommended. Combined with `docker_user`, this means the container runs as a normal, unprivileged user. |
+| `docker_user` | `--user` | Defaults to the sentinel `'host'`, which resolves at runtime to `f"{euid}:{egid}"` of the user running `test_runner.py`. This is required when `docker_drop_capabilities = True`: dropping `CAP_DAC_OVERRIDE` means container-root can no longer write to a bind mount it does not own. Set to an explicit `'1000:1000'` / `'root'` to override, or to `''`/`None` to use whatever USER the image declares. |
 
 ### End-to-end examples
 
@@ -123,13 +125,46 @@ When Docker is enabled:
   those paths exist inside the chosen image, or build a custom image
   that bundles them, or use `preamble_cmd` to stage the files into
   the student directory (which *is* mounted) before tests run.
-- `--storage-opt size=` is the only knob Docker offers for capping a
-  container's rootfs size, and it depends on the storage driver. If
-  your driver does not support it, omit `docker_disk` and rely on
-  memory + timeout limits instead.
 - On Linux, the bind mount lets students write back into their
   submission directory — this is intentional so `result.json` ends up
   in the right place for the aggregator.
+
+### Bind mounts and disk usage
+
+`--storage-opt size=` (i.e. `docker_disk`) caps the container's
+**writable rootfs layer only**. Writes to the bind-mounted submission
+directory pass straight through to the host filesystem and are *not*
+counted against that cap. Two consequences for graders:
+
+- Student code can fill your host disk via the submission directory
+  unless you also place a filesystem quota on the directory that holds
+  submissions. On Linux, the canonical solutions are XFS project
+  quotas (`xfs_quota -x`) or ext4 quotas (`quotaon`, `setquota`).
+  Without one of those, treat `docker_disk` as a defence against
+  rootfs abuse only.
+- Writes that students perform under `/tmp`, `/var/tmp`, or anywhere
+  else that is **not** the bundled bind mount *are* covered by
+  `docker_disk`.
+
+The bundled [diskhog example](./pam/docker_examples/submissions/diskhog/A1/solution.py)
+deliberately writes to `/tmp/diskhog.bin` so it exercises the
+`docker_disk` cap rather than your host disk.
+
+### Container UID and bind-mount permissions
+
+`docker_user` (default `'host'`) is what makes the sandbox usable
+together with `docker_drop_capabilities = True`. Without it, container
+processes run as root, but `--cap-drop ALL` strips
+`CAP_DAC_OVERRIDE` — the capability that lets root bypass file
+permissions. The result is that container-root can no longer write to
+a bind mount it does not own, which manifests as `PermissionError`
+when your test command tries to drop `result.json` into the student
+directory. Running as the host UID:GID sidesteps the problem and as a
+bonus means the container is never root in the first place.
+
+If you keep `docker_drop_capabilities = False`, you can also keep
+`docker_user = ''` / `None` and let container-root use
+`CAP_DAC_OVERRIDE` instead — but you trade away most of the sandbox.
 
 ## Support
 

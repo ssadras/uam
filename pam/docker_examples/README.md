@@ -77,7 +77,7 @@ needed inside the sandbox).
 | `infloop` | `docker_timeout` + `timeout(1)` inside the container | container killed at ~30 s; host stays responsive |
 | `forkbomb` | dropped capabilities, container PID namespace | bomb confined to the container; host process table untouched |
 | `memhog` | `docker_memory` / `--memory-swap` (swap disabled) | OOM-killed by Docker before host memory is touched |
-| `diskhog` | `docker_disk` (`--storage-opt size=`) | write fails with ENOSPC inside the container; host disk untouched |
+| `diskhog` | `docker_disk` (`--storage-opt size=`) | writes to `/tmp/diskhog.bin` (container rootfs); fails with ENOSPC at the `docker_disk` cap. Note: writes to the bind-mounted `/submission` would *not* be caught by this knob — see the top-level README's [Bind mounts and disk usage](../../README.md#bind-mounts-and-disk-usage). |
 | `network` | `docker_network = 'none'` | socket calls fail with EHOSTUNREACH / EAI_AGAIN |
 | `host_escape` | bind-mount scope, dropped caps, `no-new-privileges` | reads return image-only data, not host files; writes outside `/submission` evaporate with `--rm` |
 

@@ -62,6 +62,8 @@ docker_enabled = False
 # docker_timeout = 60                 # per-command wall-clock in seconds
 # docker_network = 'none'             # 'none' isolates from the network
 # docker_drop_capabilities = True     # drop ALL caps + no-new-privileges
+# docker_user = 'host'                # 'host' -> current UID:GID; required
+#                                     #   when capabilities are dropped
 # docker_workdir = '/submission'      # mount point inside the container
 # docker_binary = 'docker'            # override if docker is not on PATH
 

@@ -34,8 +34,15 @@ from utils.defaults import (
     DEFAULT_DOCKER_MEMORY,
     DEFAULT_DOCKER_NETWORK,
     DEFAULT_DOCKER_TIMEOUT,
+    DEFAULT_DOCKER_USER,
     DEFAULT_DOCKER_WORKDIR,
 )
+
+
+# Sentinel string for DEFAULT_DOCKER_USER. Resolved at runtime in
+# DockerConfig to the current host UID:GID on POSIX systems, or to None
+# (i.e. let the image choose) on non-POSIX hosts.
+_HOST_USER_SENTINEL = 'host'
 
 
 class DockerConfigError(ValueError):
@@ -52,7 +59,7 @@ class DockerConfig:
     '''
 
     def __init__(self, enabled, image, cpus, memory, disk, timeout,
-                 workdir, network, drop_capabilities, binary):
+                 workdir, network, drop_capabilities, user, binary):
         self.enabled = bool(enabled)
         self.image = image
         self.cpus = cpus
@@ -62,9 +69,30 @@ class DockerConfig:
         self.workdir = workdir
         self.network = network
         self.drop_capabilities = bool(drop_capabilities)
+        self.user = self._resolve_user(user)
         self.binary = binary
 
         self._validate()
+
+    @staticmethod
+    def _resolve_user(spec):
+        '''Translate a `docker_user` config value into a `--user` argument.
+
+        - Falsy values (`None`, `''`) -> no `--user` flag is emitted.
+        - The sentinel ``'host'`` -> ``f'{euid}:{egid}'`` on POSIX; ``None``
+          on platforms without ``os.geteuid`` (e.g. Windows hosts, where
+          Docker Desktop already translates bind-mount ownership).
+        - Anything else is passed through unchanged so users can pin a
+          specific UID/GID or named user.
+        '''
+
+        if not spec:
+            return None
+        if spec == _HOST_USER_SENTINEL:
+            if hasattr(os, 'geteuid') and hasattr(os, 'getegid'):
+                return '{}:{}'.format(os.geteuid(), os.getegid())
+            return None
+        return str(spec)
 
     def _validate(self):
         if not self.enabled:
@@ -101,6 +129,7 @@ class DockerConfig:
             drop_capabilities=getattr(
                 config, 'docker_drop_capabilities',
                 DEFAULT_DOCKER_DROP_CAPABILITIES),
+            user=getattr(config, 'docker_user', DEFAULT_DOCKER_USER),
             binary=getattr(config, 'docker_binary', DEFAULT_DOCKER_BINARY),
         )
 
@@ -171,6 +200,13 @@ def build_docker_command(test_cmd, host_dir, docker_config):
             '--cap-drop', 'ALL',
             '--security-opt', 'no-new-privileges',
         ])
+
+    if docker_config.user:
+        # Running as the host UID:GID keeps bind-mount permissions sane
+        # once CAP_DAC_OVERRIDE has been dropped. It is also a stronger
+        # security posture: even if the container is breached, the
+        # attacker only has the host user's privileges, not root's.
+        args.extend(['--user', docker_config.user])
 
     # Enforce the wall-clock limit *inside* the container as well: signal
     # propagation from `docker run` to the container is best-effort, and a
