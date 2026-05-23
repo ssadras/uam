@@ -166,6 +166,13 @@ explanation of each setting, see the
 [Docker sandbox section](../README.md#docker-sandbox) of the top-level
 README.
 
+A complete, end-to-end Docker example — with a self-contained Java
+test driver (no JUnit/JAM jars needed inside the sandbox) and
+submissions covering correct, buggy, and actively malicious code
+(infinite loop, memory hog, network calls, host-filesystem probes) —
+lives in [docker_examples/](./docker_examples/). Use it to validate
+your sandbox setup.
+
 Jam-specific tips:
 
 - Use an image with a matching JDK — `openjdk:11-slim` works for most

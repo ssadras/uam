@@ -86,6 +86,19 @@ docker_binary = 'docker'            # override if docker is not on PATH
 | `docker_network` | `--network` | `'none'` blocks all networking (default). Use `'bridge'` only if tests legitimately need it. |
 | `docker_drop_capabilities` | `--cap-drop ALL --security-opt no-new-privileges` | Strongly recommended. |
 
+### End-to-end examples
+
+Two ready-to-run examples exercise every Docker knob against a curated
+mix of correct, buggy, and actively malicious submissions:
+
+- [pam/docker_examples](./pam/docker_examples/) — Python, uses
+  `python:3.11-slim`.
+- [jam/docker_examples](./jam/docker_examples/) — Java, uses
+  `openjdk:11-slim`.
+
+Each example has its own README documenting which sandbox setting
+each submission is intended to exercise.
+
 ### How it works
 
 When Docker is enabled:

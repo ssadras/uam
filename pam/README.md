@@ -146,6 +146,13 @@ explanation of each setting, see the
 [Docker sandbox section](../README.md#docker-sandbox) of the top-level
 README.
 
+A complete, end-to-end Docker example — with a self-contained test
+driver and submissions covering correct, buggy, and actively malicious
+code (infinite loop, fork bomb, memory hog, disk hog, network calls,
+host-filesystem probes) — lives in
+[docker_examples/](./docker_examples/). Use it to validate your
+sandbox setup.
+
 Pam-specific tips:
 
 - Use an image that ships with Python — `python:3.11-slim` is a
