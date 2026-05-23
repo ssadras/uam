@@ -25,9 +25,8 @@ installing the packages system-wide.
 
 To use JAM, you also need Java >= 7 installed in your system.
 
-To enable the Docker sandbox (recommended for grading untrusted
-student submissions), you also need Docker installed and reachable on
-your PATH. See [Docker sandbox](#docker-sandbox) below.
+To use the Docker sandbox (see below), you also need Docker on your
+PATH.
 
 ## Usage
 
@@ -39,157 +38,52 @@ contains the Java AutoMarker with instructions and examples.
 See README files for [pam](./pam/README.md) and [jam](./jam/README.md)
 for specific instructions.
 
-A high-level map of the codebase, written for new contributors and AI
-assistants, lives in [AGENTS.md](./AGENTS.md).
-
 ## Docker sandbox
 
-Student code is untrusted: an assignment might infinite-loop, write
-gigabytes to disk, or attempt to phone home. The test runner can wrap
-every `test_cmd` in a disposable Docker container so that student code
-runs in isolation, with bounded CPU, memory, disk, and wall-clock
-limits, and (by default) no network access.
-
-### Enabling
-
-Set `docker_enabled = True` in your `config.py`. All other Docker
-options are optional; defaults come from
-[utils/defaults.py](./utils/defaults.py).
-
-```python
-# Minimal config: enable Docker with all defaults.
-docker_enabled = True
-```
-
-### Full set of options
+Student code is untrusted, so the test runner can wrap each `test_cmd`
+in a disposable Docker container. To turn it on, add this to your
+config:
 
 ```python
 docker_enabled = True
-docker_image = 'python:3.11-slim'   # image used to run student code
-docker_cpus = '1.0'                 # fractional CPU cores (Docker --cpus)
-docker_memory = '256m'              # memory cap (Docker suffixes: k/m/g)
-docker_disk = '1g'                  # container rootfs cap (--storage-opt size)
-docker_timeout = 60                 # per-command wall-clock limit, seconds
-docker_network = 'none'             # 'none' isolates from network; 'bridge' restores it
-docker_drop_capabilities = True     # drop ALL Linux caps + no-new-privileges
-docker_user = 'host'                # 'host' = current UID:GID; '' to disable
-docker_workdir = '/submission'      # mount point inside the container
-docker_binary = 'docker'            # override if docker is not on PATH
+docker_image   = 'python:3.11-slim'   # any image with your toolchain
+docker_cpus    = '1.0'
+docker_memory  = '256m'
+docker_disk    = '1g'
+docker_timeout = 60                   # seconds, enforced inside + outside
+docker_network = 'none'               # 'bridge' if tests need it
 ```
 
-| Setting | Maps to | Notes |
-| --- | --- | --- |
-| `docker_image` | image tag | Pick one that already has your test toolchain (Python for pam, JDK for jam). |
-| `docker_cpus` | `--cpus` | Fractional cores. `'0.5'` is half a core. |
-| `docker_memory` | `--memory` / `--memory-swap` | Swap is disabled by setting both equal. |
-| `docker_disk` | `--storage-opt size=` **and** `--ulimit fsize=` | Two-pronged cap. The storage-opt half limits the container's writable rootfs but only works on storage drivers that support per-container quotas (overlay2 on xfs+pquota, devicemapper, btrfs, zfs); other drivers — including the very common overlay2-on-ext4 and the newer `overlayfs` rootless driver — silently ignore it. The ulimit half caps the maximum size of any *single* file the process can create and is enforced by the kernel via `RLIMIT_FSIZE`, so it works everywhere. Together they catch single-file disk-fill attacks even when the storage driver doesn't help. See [Bind mounts and disk usage](#bind-mounts-and-disk-usage). |
-| `docker_timeout` | `timeout --signal=KILL` inside the container | Enforced in two places: as a `subprocess` timeout on the host, and via `timeout(1)` inside the container, so a student process that ignores signals still dies. Make sure `config.timeout` is `>=` `docker_timeout`. |
-| `docker_network` | `--network` | `'none'` blocks all networking (default). Use `'bridge'` only if tests legitimately need it. |
-| `docker_drop_capabilities` | `--cap-drop ALL --security-opt no-new-privileges` | Strongly recommended. Combined with `docker_user`, this means the container runs as a normal, unprivileged user. |
-| `docker_user` | `--user` | Defaults to the sentinel `'host'`, which resolves at runtime to `f"{euid}:{egid}"` of the user running `test_runner.py`. This is required when `docker_drop_capabilities = True`: dropping `CAP_DAC_OVERRIDE` means container-root can no longer write to a bind mount it does not own. Set to an explicit `'1000:1000'` / `'root'` to override, or to `''`/`None` to use whatever USER the image declares. |
+Every setting has a default in [utils/defaults.py](./utils/defaults.py)
+so you can leave any of them out. When Docker is enabled, the student's
+directory is bind-mounted into the container (default `/submission`),
+preamble/postamble still run on the host, and the container is removed
+on exit.
 
-### End-to-end examples
+A few notes worth knowing up front:
 
-Two ready-to-run examples exercise every Docker knob against a curated
-mix of correct, buggy, and actively malicious submissions:
+- The container runs as your host UID:GID by default (`docker_user =
+  'host'`). This is required when `docker_drop_capabilities = True`
+  (also the default) because `--cap-drop ALL` removes
+  `CAP_DAC_OVERRIDE`, so container-root can't write to your bind
+  mount.
+- `docker_disk` emits both `--storage-opt size=` and
+  `--ulimit fsize=`. The first only works on storage drivers with
+  per-container quotas (XFS+pquota, btrfs, devicemapper, zfs); on
+  ext4/overlayfs it's silently ignored. The ulimit half is enforced by
+  the kernel and works everywhere, but only caps individual files —
+  not total writes. For full coverage on a shared grading host, add a
+  filesystem quota on the directory holding submissions.
+- Anything `test_cmd` references must exist *inside* the image.
+  Either bake your tools into a custom image or stage them into the
+  student directory via `preamble_cmd` (which runs on the host, before
+  the container starts).
 
-- [pam/docker_examples](./pam/docker_examples/) — Python, uses
-  `python:3.11-slim`.
-- [jam/docker_examples](./jam/docker_examples/) — Java, uses
-  `openjdk:11-slim`.
-
-Each example has its own README documenting which sandbox setting
-each submission is intended to exercise.
-
-### How it works
-
-When Docker is enabled:
-
-1. `test_runner.py` checks that the Docker binary is on PATH and fails
-   fast with a clear message if not.
-2. `preamble_cmd` and `postamble_cmd` continue to run **on the host**
-   (they normally copy test files into the student directory and
-   clean them up).
-3. Each entry in `test_cmd` is wrapped with `docker run --rm` and
-   executed as `sh -c '<your command>'` inside the container, with the
-   student's directory bind-mounted at `docker_workdir` (default
-   `/submission`).
-4. The container is removed automatically (`--rm`) when the command
-   exits, regardless of success or failure.
-
-### Notes and limitations
-
-- Paths inside `test_cmd` must make sense **inside the container**.
-  If your command references absolute host paths (e.g. `path_to_uam`
-  in [pam/examples/config.py](./pam/examples/config.py)), make sure
-  those paths exist inside the chosen image, or build a custom image
-  that bundles them, or use `preamble_cmd` to stage the files into
-  the student directory (which *is* mounted) before tests run.
-- On Linux, the bind mount lets students write back into their
-  submission directory — this is intentional so `result.json` ends up
-  in the right place for the aggregator.
-
-### Bind mounts and disk usage
-
-`docker_disk` is enforced in two ways at the same time:
-
-1. **`--storage-opt size=<spec>`** caps the container's writable
-   rootfs layer. Only some storage drivers honour this option: overlay2
-   on XFS+pquota, devicemapper, btrfs, zfs. The default on most Linux
-   hosts — overlay2 on ext4, and the newer rootless `overlayfs` driver
-   — silently ignores it. To check whether your installation enforces
-   it:
-
-   ```sh
-   docker info | grep 'Storage Driver'
-   docker run --rm --storage-opt size=1g python:3.11-slim \
-       sh -c 'dd if=/dev/zero of=/tmp/x bs=1M count=1500 2>&1 | tail -1'
-   ```
-
-   If the `dd` writes the full 1.5 GiB, the option is being ignored.
-
-2. **`--ulimit fsize=<bytes>`** caps the maximum size of any *single*
-   file the process can create. This is enforced unconditionally by
-   the kernel via `RLIMIT_FSIZE` and works on every storage driver.
-   It catches a student writing one huge file (the most common
-   disk-fill pattern), but does not bound the *total* of many small
-   files.
-
-What `docker_disk` cannot do on its own:
-
-- Cap writes to the bind-mounted submission directory. The bind mount
-  passes straight through to the host filesystem; the storage-opt half
-  doesn't see it at all, and the ulimit half only caps individual
-  files inside it.
-- Stop a student writing thousands of small files on a storage driver
-  that ignores `--storage-opt`. The ulimit cap is per-file.
-
-For comprehensive disk safety in production, layer a filesystem quota
-on the host directory that holds student submissions. On Linux, the
-canonical mechanisms are XFS project quotas (`xfs_quota -x`) or ext4
-quotas (`quotaon`, `setquota`). With one of those in place,
-`docker_disk` becomes the inner ring of defence and the host quota the
-outer.
-
-The bundled [diskhog example](./pam/docker_examples/submissions/diskhog/A1/solution.py)
-writes one large file to `/tmp/diskhog.bin`, so the ulimit half of
-`docker_disk` catches it on every storage driver.
-
-### Container UID and bind-mount permissions
-
-`docker_user` (default `'host'`) is what makes the sandbox usable
-together with `docker_drop_capabilities = True`. Without it, container
-processes run as root, but `--cap-drop ALL` strips
-`CAP_DAC_OVERRIDE` — the capability that lets root bypass file
-permissions. The result is that container-root can no longer write to
-a bind mount it does not own, which manifests as `PermissionError`
-when your test command tries to drop `result.json` into the student
-directory. Running as the host UID:GID sidesteps the problem and as a
-bonus means the container is never root in the first place.
-
-If you keep `docker_drop_capabilities = False`, you can also keep
-`docker_user = ''` / `None` and let container-root use
-`CAP_DAC_OVERRIDE` instead — but you trade away most of the sandbox.
+An end-to-end example for each language lives in
+[pam/docker_examples](./pam/docker_examples/) and
+[jam/docker_examples](./jam/docker_examples/), with submissions that
+exercise every limit (infinite loop, fork bomb, memory hog, disk hog,
+outbound network, host-filesystem probes).
 
 ## Support
 

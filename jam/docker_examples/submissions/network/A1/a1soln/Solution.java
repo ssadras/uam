@@ -5,13 +5,8 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 
 /**
- * Malicious submission: tries to make outbound network calls.
- *
- * Verifies that {@code docker_network = 'none'} prevents student code
- * from exfiltrating data or contacting external hosts. With the
- * sandbox active the {@code Socket} construction below should fail
- * almost immediately; the test driver records the failure under the
- * 'errors' bucket and the test_runner itself stays healthy.
+ * Tries to open outbound sockets. Verifies docker_network = 'none' --
+ * with networking disabled the connect call fails almost immediately.
  */
 public final class Solution {
 
@@ -19,11 +14,8 @@ public final class Solution {
     }
 
     private static void tryConnect() throws IOException {
-        Socket socket = new Socket();
-        try {
+        try (Socket socket = new Socket()) {
             socket.connect(new InetSocketAddress("example.com", 80), 2000);
-        } finally {
-            socket.close();
         }
     }
 

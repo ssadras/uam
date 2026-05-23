@@ -1,22 +1,9 @@
-'''Docker sandbox wrapper for the UAM test runner.
+'''Build the `docker run` command that wraps a single test_cmd.
 
-Student-submitted code is untrusted. Running it directly on the grading
-host risks data loss, network abuse, and resource exhaustion. This module
-builds a `docker run` invocation that wraps an arbitrary shell command in
-a disposable container with:
-
-  * a read-write bind mount of the student's submission directory
-  * configurable CPU, memory, and disk caps
-  * a wall-clock timeout enforced at the Docker level (in addition to the
-    subprocess-level timeout already applied by test_runner)
-  * network isolation and dropped Linux capabilities by default
-
-The public entry point is `build_docker_command`, which returns a single
-shell-quoted string suitable for `subprocess.Popen(..., shell=True)`. This
-keeps the call site in test_runner.py untouched aside from a wrapping step.
-
-Configuration is read from a UAM config module via `DockerConfig.from_module`;
-missing attributes fall back to the constants in `utils.defaults`.
+The public entry point is `build_docker_command`. Settings are
+resolved via `DockerConfig.from_module(config)`, which falls back to
+the `DEFAULT_DOCKER_*` constants in utils.defaults for anything the
+user's config omits.
 
 '''
 
@@ -39,33 +26,19 @@ from utils.defaults import (
 )
 
 
-# Sentinel string for DEFAULT_DOCKER_USER. Resolved at runtime in
-# DockerConfig to the current host UID:GID on POSIX systems, or to None
-# (i.e. let the image choose) on non-POSIX hosts.
+# Special value of docker_user: substitute current host UID:GID at runtime.
 _HOST_USER_SENTINEL = 'host'
+
+_SIZE_UNITS = {'b': 1, 'k': 1024, 'm': 1024 ** 2,
+               'g': 1024 ** 3, 't': 1024 ** 4}
 
 
 class DockerConfigError(ValueError):
     '''Raised when a config module supplies an invalid Docker setting.'''
 
 
-# Suffix -> multiplier for Docker-style size strings ('1g', '256m', ...).
-_SIZE_UNITS = {
-    'b': 1,
-    'k': 1024,
-    'm': 1024 ** 2,
-    'g': 1024 ** 3,
-    't': 1024 ** 4,
-}
-
-
 def _parse_size(spec):
-    '''Translate a Docker-style size spec to a byte count.
-
-    Accepts ``'1g'``, ``'256M'``, ``'1024k'``, ``'42'`` (bare bytes),
-    or already-numeric values. Raises ``DockerConfigError`` on anything
-    else.
-    '''
+    '''Translate a Docker-style size ('1g', '256M', '1024k') to bytes.'''
 
     if isinstance(spec, int):
         if spec <= 0:
@@ -77,19 +50,17 @@ def _parse_size(spec):
             'size must be a non-empty string (got {!r}).'.format(spec))
 
     text = spec.strip().lower()
-    suffix = text[-1]
-    if suffix in _SIZE_UNITS:
-        digits = text[:-1]
+    if text[-1] in _SIZE_UNITS:
+        digits, suffix = text[:-1], text[-1]
     else:
-        digits = text
-        suffix = 'b'
+        digits, suffix = text, 'b'
 
     try:
         value = int(digits)
     except ValueError:
         raise DockerConfigError(
-            'cannot parse size {!r}; expected forms like '
-            "'256m', '1g', '1024k'.".format(spec))
+            "cannot parse size {!r}; expected forms like '256m', '1g', "
+            "'1024k'.".format(spec))
     if value <= 0:
         raise DockerConfigError(
             'size must be positive (got {!r}).'.format(spec))
@@ -97,13 +68,7 @@ def _parse_size(spec):
 
 
 class DockerConfig:
-    '''Resolved Docker settings for a single test_runner invocation.
-
-    Attributes mirror the `DEFAULT_DOCKER_*` constants in
-    `utils.defaults`. Construct via `DockerConfig.from_module(config)` so
-    that missing attributes pick up the framework defaults.
-
-    '''
+    '''Resolved Docker settings for one test_runner invocation.'''
 
     def __init__(self, enabled, image, cpus, memory, disk, timeout,
                  workdir, network, drop_capabilities, user, binary):
@@ -123,14 +88,10 @@ class DockerConfig:
 
     @staticmethod
     def _resolve_user(spec):
-        '''Translate a `docker_user` config value into a `--user` argument.
+        '''docker_user -> value for `--user`, or None to omit.
 
-        - Falsy values (`None`, `''`) -> no `--user` flag is emitted.
-        - The sentinel ``'host'`` -> ``f'{euid}:{egid}'`` on POSIX; ``None``
-          on platforms without ``os.geteuid`` (e.g. Windows hosts, where
-          Docker Desktop already translates bind-mount ownership).
-        - Anything else is passed through unchanged so users can pin a
-          specific UID/GID or named user.
+        The sentinel 'host' becomes the current EUID:EGID on POSIX,
+        and None on Windows (Docker Desktop already remaps ownership).
         '''
 
         if not spec:
@@ -143,7 +104,7 @@ class DockerConfig:
 
     def _validate(self):
         if not self.enabled:
-            return  # other fields are unused when Docker is off
+            return
         if not self.image:
             raise DockerConfigError('docker_image must be a non-empty string.')
         if self.timeout <= 0:
@@ -155,18 +116,11 @@ class DockerConfig:
                 'docker_workdir must be an absolute container path '
                 '(got {!r}).'.format(self.workdir))
         if self.disk:
-            # Validate eagerly so a misconfigured size errors at config
-            # load time, not partway into the run.
-            _parse_size(self.disk)
+            _parse_size(self.disk)  # fail fast on a bad size string
 
     @staticmethod
     def from_module(config):
-        '''Build a DockerConfig from a user-supplied config module.
-
-        Any attribute not present on `config` falls back to the matching
-        `DEFAULT_DOCKER_*` constant.
-
-        '''
+        '''Build a DockerConfig from a user config module.'''
 
         return DockerConfig(
             enabled=getattr(config, 'docker_enabled', DEFAULT_DOCKER_ENABLED),
@@ -186,97 +140,60 @@ class DockerConfig:
 
 
 def is_docker_available(binary=DEFAULT_DOCKER_BINARY):
-    '''Return True if `binary` can be located on PATH.
-
-    Resolving the binary up front lets test_runner fail fast with a clear
-    message rather than spawning shells that fail one by one.
-
-    '''
+    '''Return True if the docker binary is on PATH.'''
 
     return shutil.which(binary) is not None
 
 
 def build_docker_command(test_cmd, host_dir, docker_config):
-    '''Return a shell command string that runs `test_cmd` inside Docker.
+    '''Wrap test_cmd in a `docker run` invocation; return a shell string.
 
-    Parameters
-    ----------
-    test_cmd : str
-        The original shell command to run inside the container. It is
-        forwarded verbatim to `sh -c`, so multi-step pipelines and
-        redirections behave the same as on the host.
-    host_dir : str
-        Absolute path on the host that should be bind-mounted into the
-        container as the working directory. Typically the student's
-        submission directory.
-    docker_config : DockerConfig
-        Resolved Docker settings.
-
-    Returns
-    -------
-    str
-        A single shell command suitable for `subprocess.Popen(shell=True)`.
-
+    `host_dir` is bind-mounted to docker_config.workdir. The original
+    test_cmd is run via `sh -c`, so pipelines and redirects work as
+    they would on the host.
     '''
 
     if not docker_config.enabled:
         raise DockerConfigError(
             'build_docker_command called with docker disabled.')
 
-    host_dir = os.path.abspath(host_dir)
-    mount = '{src}:{dst}'.format(
-        src=host_dir, dst=docker_config.workdir)
+    mount = '{}:{}'.format(os.path.abspath(host_dir), docker_config.workdir)
 
     args = [
         docker_config.binary, 'run',
-        '--rm',                                # auto-remove on exit
-        '--interactive',                       # propagate stdin/stdout/stderr
+        '--rm',
+        '--interactive',
         '--workdir', docker_config.workdir,
         '--volume', mount,
         '--network', docker_config.network,
         '--cpus', str(docker_config.cpus),
         '--memory', str(docker_config.memory),
-        '--memory-swap', str(docker_config.memory),  # disable swap
+        '--memory-swap', str(docker_config.memory),  # equal to --memory: no swap
         '--stop-timeout', str(docker_config.timeout),
     ]
 
     if docker_config.disk:
-        # Two-pronged disk cap:
-        #   * --storage-opt size=<spec>  caps the container's writable
-        #     rootfs layer on storage drivers that support per-container
-        #     quotas (overlay2 on XFS+pquota, devicemapper, btrfs, zfs).
-        #     Other drivers (notably overlay2 on ext4 and the newer
-        #     "overlayfs" driver) silently ignore the option.
-        #   * --ulimit fsize=<bytes>     caps the maximum size of any
-        #     single file the process can create, enforced unconditionally
-        #     by the kernel via RLIMIT_FSIZE. This catches single-file
-        #     disk-fill attacks even when --storage-opt is ignored.
-        # Together they give defense in depth across storage drivers.
-        args.extend(['--storage-opt', 'size={}'.format(docker_config.disk)])
-        args.extend(['--ulimit',
-                     'fsize={}'.format(_parse_size(docker_config.disk))])
+        # --storage-opt only works on drivers with per-container quotas
+        # (XFS+pquota, btrfs, devicemapper, zfs); ext4/overlayfs ignore
+        # it. --ulimit fsize is kernel-enforced everywhere but caps per
+        # file, not total. Pass both for coverage.
+        args += ['--storage-opt', 'size={}'.format(docker_config.disk)]
+        args += ['--ulimit', 'fsize={}'.format(_parse_size(docker_config.disk))]
 
     if docker_config.drop_capabilities:
-        args.extend([
-            '--cap-drop', 'ALL',
-            '--security-opt', 'no-new-privileges',
-        ])
+        args += ['--cap-drop', 'ALL',
+                 '--security-opt', 'no-new-privileges']
 
     if docker_config.user:
-        # Running as the host UID:GID keeps bind-mount permissions sane
-        # once CAP_DAC_OVERRIDE has been dropped. It is also a stronger
-        # security posture: even if the container is breached, the
-        # attacker only has the host user's privileges, not root's.
-        args.extend(['--user', docker_config.user])
+        # Required alongside --cap-drop ALL: without CAP_DAC_OVERRIDE
+        # container-root can't write to a host-owned bind mount.
+        args += ['--user', docker_config.user]
 
-    # Enforce the wall-clock limit *inside* the container as well: signal
-    # propagation from `docker run` to the container is best-effort, and a
-    # student process that ignores SIGTERM can otherwise outlive the host
-    # subprocess timeout. `timeout --signal=KILL` is part of GNU coreutils
-    # and busybox; both are present in any reasonable base image.
-    guarded_cmd = 'timeout --signal=KILL {seconds}s {cmd}'.format(
-        seconds=docker_config.timeout, cmd=test_cmd)
+    # Backstop the host-side subprocess timeout with one inside the
+    # container, since signal propagation from `docker run` is
+    # best-effort and a process that ignores SIGTERM can outlive it.
+    guarded = 'timeout --signal=KILL {}s {}'.format(
+        docker_config.timeout, test_cmd)
+    args += [docker_config.image, 'sh', '-c', guarded]
 
-    args.extend([docker_config.image, 'sh', '-c', guarded_cmd])
-
-    return ' '.join(shlex.quote(arg) for arg in args)
+    return ' '.join(shlex.quote(a) for a in args)

@@ -1,14 +1,7 @@
-"""Malicious submission: attempts to exhaust the process table.
+"""Forks in a loop. Only safe to run with docker_enabled = True.
 
-Verifies that, with capabilities dropped and CPU/memory caps in place,
-the container cannot fork enough children to harm the host. Docker's
-default PID namespace also confines any children that *do* get spawned
-to the container.
-
-The bomb is intentionally bounded (4096 fork attempts, not unbounded
-recursion) so that if someone misruns this example WITHOUT Docker the
-host has a fighting chance of recovering. Bounded or not, do not run
-this without ``docker_enabled = True``.
+The bomb is capped at 4096 fork attempts (not unbounded recursion) so
+that an accidental misrun is recoverable.
 """
 
 import os
@@ -20,15 +13,9 @@ def _bomb():
     spawned = 0
     while spawned < _BOUND:
         try:
-            pid = os.fork()
+            os.fork()
         except OSError:
-            # Hit a resource limit -- exactly what we are testing.
-            return
-        if pid == 0:
-            # Child: continue forking, then exit to keep the chain alive
-            # without truly exploding.
-            spawned += 1
-            continue
+            return  # hit a resource limit, which is the point
         spawned += 1
 
 

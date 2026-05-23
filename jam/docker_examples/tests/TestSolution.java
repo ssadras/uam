@@ -1,20 +1,11 @@
 /*
- * Self-contained UAM test driver for the JAM Docker sandbox example.
+ * UAM test driver for the JAM Docker sandbox example.
  *
- * This class is staged into each student's submission directory by the
- * preamble command, then compiled and run inside the sandbox
- * container. It runs a fixed spec against ``a1soln.Solution`` and
- * writes a UAM-compatible ``result.json``.
- *
- * It depends on the JDK only -- no JUnit, no external jars -- so the
- * example works with a vanilla ``openjdk:11-slim`` image.
- *
- * Spec under test
- * ---------------
- *   Solution.safeSum(int[] nums)      -> int. Sum of nums.
- *   Solution.safeAverage(int[] nums)  -> double. Mean of nums; 0.0 if empty.
- *
- * Both methods are expected to be total (no exceptions on valid input).
+ * Staged into each student's directory by the config's preamble, then
+ * compiled and run inside the container. Runs a fixed spec against
+ * a1soln.Solution (safeSum + safeAverage) and writes a UAM-compatible
+ * result.json. Uses only the JDK so no jars are needed inside the
+ * sandbox.
  */
 
 import java.io.IOException;
@@ -33,13 +24,8 @@ public final class TestSolution {
         Object run() throws Throwable;
     }
 
-    /**
-     * The aggregate HTML template groups results by
-     * {@code testId.split('.')[:2]} (mirroring unittest's
-     * {@code module.TestCaseClass.testMethod} convention). The
-     * per-test-case key under {@code results} and the test IDs in
-     * {@code tests} must share this prefix.
-     */
+    // The aggregate HTML template groups by testId.split('.')[:2], so
+    // this string and every test ID must share the same prefix.
     private static final String TEST_CASE = "docker_examples.SolutionTests";
 
     private static final class Case {

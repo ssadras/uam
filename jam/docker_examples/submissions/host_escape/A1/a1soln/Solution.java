@@ -6,27 +6,17 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
- * Malicious submission: probes for host filesystem access.
- *
- * Verifies that:
- *   * the only host path inside the container is the bind-mounted
- *     submission directory (so reading /etc/shadow off the host is
- *     impossible -- the container's /etc/shadow is the *image's*,
- *     which never contains real credentials);
- *   * dropped capabilities + {@code no-new-privileges} block
- *     privilege escalation;
- *   * writes outside the bind mount land in the ephemeral container
- *     rootfs and are discarded with {@code --rm} at container exit.
- *
- * Nothing in this class can damage the host.
+ * Probes the container for host-filesystem access. The reads return
+ * either image-only data or an exception; any write outside the bind
+ * mount lands in the ephemeral container layer that --rm discards.
  */
 public final class Solution {
 
     private static final String[] PROBES = {
-        "/etc/shadow",        // would-be host credentials (not present)
-        "/proc/1/environ",    // init's environment
-        "/proc/self/maps",    // leaks ASLR / loaded libs
-        "/root/.ssh/id_rsa",  // would-be host ssh key
+        "/etc/shadow",
+        "/proc/1/environ",
+        "/proc/self/maps",
+        "/root/.ssh/id_rsa",
     };
 
     private Solution() {
@@ -37,14 +27,11 @@ public final class Solution {
             try {
                 Files.readAllBytes(Paths.get(path));
             } catch (IOException | SecurityException ignored) {
-                // expected -- access denied or file not present
             }
         }
     }
 
     private static void writeOutsideMount() {
-        // Inside Docker this either fails or lands in the ephemeral
-        // container layer that --rm discards.
         try {
             Files.write(Path.of("/tmp/uam-escape-attempt"),
                     "this file should never appear on the host".getBytes());

@@ -1,47 +1,33 @@
-"""Malicious submission: probes for host filesystem access.
+"""Probes the container for host-filesystem access.
 
-Verifies that:
-
-  * the only host path inside the container is the bind-mounted
-    submission directory (so reading /etc/shadow off the host is
-    impossible -- the container's /etc/shadow is the *image's*,
-    which never contains real credentials);
-  * dropped capabilities + ``no-new-privileges`` block privilege
-    escalation attempts;
-  * writes outside the bind mount land in the ephemeral container
-    rootfs and are discarded with ``--rm`` at container exit.
-
-Nothing in this script can damage the host. It is included so graders
-can confirm the sandbox behaves as advertised by inspecting the
-recorded errors.
+Reads paths that would be sensitive on a host (/etc/shadow, /proc, an
+ssh key) and attempts to plant a file outside the bind mount. Inside
+the sandbox the reads return either image-only data or EACCES, and
+any write outside /submission lands in the ephemeral container layer
+that --rm discards.
 """
 
 import os
 
 
 _PROBES = [
-    '/etc/shadow',          # would-be host credentials (not present)
-    '/proc/1/environ',      # init's environment
-    '/proc/self/maps',      # leaks ASLR / loaded libs
-    '/root/.ssh/id_rsa',    # would-be host ssh key
+    '/etc/shadow',
+    '/proc/1/environ',
+    '/proc/self/maps',
+    '/root/.ssh/id_rsa',
 ]
 
 
 def _read_probes():
-    findings = []
     for path in _PROBES:
         try:
             with open(path, 'rb') as fp:
-                findings.append((path, len(fp.read(512))))
-        except OSError as err:
-            findings.append((path, repr(err)))
-    return findings
+                fp.read(512)
+        except OSError:
+            pass  # expected
 
 
 def _write_outside_mount():
-    # Attempt to plant a file outside the bind-mounted /submission.
-    # Inside Docker this either fails (read-only rootfs paths) or lands
-    # in the ephemeral container layer that --rm discards.
     try:
         with open('/tmp/uam-escape-attempt', 'w') as fp:
             fp.write('this file should never appear on the host')

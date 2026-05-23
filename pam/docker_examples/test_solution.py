@@ -1,20 +1,9 @@
-"""Self-contained UAM test driver for the Docker sandbox example.
+"""UAM test driver for the PAM Docker sandbox example.
 
-This script is staged into each student's submission directory by the
-preamble command, then executed inside the sandbox container. It runs a
-fixed spec against ``solution.py`` and writes a UAM-compatible
-``result.json``.
-
-It deliberately depends on the Python standard library only, so the
-example works with a plain ``python:3.11-slim`` image with no
-additional packages installed inside the container.
-
-Spec under test
----------------
-``solution.safe_sum(nums)``      -> int. Sum of integers in ``nums``.
-``solution.safe_average(nums)``  -> float. Mean of ``nums``; ``0.0`` if empty.
-
-Both functions are expected to be total (no exceptions on valid input).
+Staged into each student's directory by the config's preamble, then
+run inside the container. Runs a fixed spec against ``solution.py``
+(safe_sum + safe_average) and writes a UAM-compatible result.json.
+Uses only the stdlib so no installs are needed inside the sandbox.
 """
 
 import json
@@ -23,16 +12,12 @@ import sys
 import traceback
 
 
-# The aggregate HTML template groups results by ``test_id.split('.')[:2]``
-# (mirroring unittest's ``module.TestCaseClass.test_method`` convention).
-# So the per-test-case bucket key under ``results`` and the test IDs in
-# ``tests`` must share a common ``module.TestCaseClass`` prefix that
-# matches the key here. Keep this string and the result group key in sync.
+# The aggregate HTML template groups by test_id.split('.')[:2], so
+# this string and every test ID must share the same prefix.
 TEST_CASE = 'docker_examples.SolutionTests'
 
-# Test spec: (method_name, callable, expected). The full UAM test ID is
-# ``TEST_CASE + '.' + method_name``.
-SPEC = [
+
+SPEC = [   # (method_name, callable taking the solution module, expected)
     ('test_sum_empty',     lambda s: s.safe_sum([]),          0),
     ('test_sum_one',       lambda s: s.safe_sum([42]),        42),
     ('test_sum_many',      lambda s: s.safe_sum([1, 2, 3, 4]), 10),
